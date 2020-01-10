@@ -1,0 +1,138 @@
+# 农村土地流转研究 {#land}
+
+
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(purrr)
+library(haven)
+library(visdat)
+```
+
+
+## 数据导入
+
+```{r}
+cfps2010family <- read_dta("../data/2010AllData/cfps2010family_report_nat092014.dta",
+  encoding = "GB2312"
+)
+```
+
+
+
+## 数据探索
+
+```{r}
+# colnames(cfps2010family)
+```
+
+## 选取变量
+```{r}
+cfps2010family %>%
+  select(urban, starts_with("fk201_a")) %>%
+  glimpse()
+```
+
+
+
+
+
+
+## 获取标签
+
+```{r message=FALSE, warning=FALSE}
+library(purrr)
+get_var_label <- function(dta) {
+  labels <- map(dta, function(x) attr(x, "label"))
+  data_frame(
+    name = names(labels),
+    label = as.character(labels)
+  )
+}
+
+cfps2010family %>%
+  select(urban, starts_with("fk201_a")) %>%
+  get_var_label()
+```
+
+
+
+## 数据统计
+```{r}
+cfps2010family %>%
+  dplyr::select(urban, starts_with("fk201_a")) %>%
+  #purrr::map(~ count(data.frame(x = .x), x))
+  map_if(is.character, ~count(data.frame(x = .x), x) )
+```
+
+## 缺失值
+```{r}
+library(naniar)
+cfps2010family %>%
+  select(urban, starts_with("fk201_a")) %>%
+  miss_var_summary()
+```
+
+
+```{r}
+library(visdat)
+cfps2010family %>%
+  select(urban, starts_with("fk201_a")) %>%
+  vis_dat()
+```
+
+
+
+## 数据规整
+
+```{r}
+cfps2010family %>%
+  select(urban, starts_with("fk2_s")) %>%
+  filter(urban == "0")
+```
+
+```{r}
+# filter_if，filter_at，filter_all
+# para 1:tbl, para 2:column, para 3:row
+
+a <- cfps2010family %>%
+  select(urban, starts_with("fk201_a")) %>%
+  filter_at(vars(starts_with("fk201_a")), any_vars(. > 0))
+
+a
+```
+
+
+
+```{r}
+a %>% mutate_at(vars(starts_with("fk201_a")), funs(replace(., . < 0, 0)))
+```
+
+## 模型建立
+
+```{r message=FALSE, warning=FALSE}
+# probit_t <- glm(
+#   formula = Y ~ .,
+#   family = binomial(link = "probit"), # canonical link function
+#   data = data
+# )
+#
+# summary(probit_t)
+```
+
+
+
+
+
+## 结论分析
+
+```{r}
+# tidy(probit_t)
+```
+
+
+
+```{r}
+# confint(myprobit)
+```
+

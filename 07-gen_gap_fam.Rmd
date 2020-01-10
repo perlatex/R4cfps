@@ -1,0 +1,300 @@
+---
+title: "获取家庭关系表中的代际关系"
+author: "王杰，王敏杰"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document: 
+    extra_dependencies:
+      ctex: UTF8
+      sourcecodepro: scale = 0.85
+      sourceserifpro: default
+    fig_caption: yes
+    latex_engine: xelatex
+    number_sections: yes
+classoptions: "hyperref, 12pt, a4paper"    
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  comment = "#>",
+  collapse = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # cache = TRUE,
+  out.width = "76%",
+  fig.align = "center",
+  fig.width = 8,
+  fig.asp = 0.618, # 1 / phi
+  fig.show = "hold"
+)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(here)
+library(fs)
+library(purrr)
+library(haven)
+library(broom)
+```
+
+
+# 数据导入
+我们选取了北京大学开放数据平台中的中国家庭追踪调查CFPS^[<http://opendata.pku.edu.cn/>]的2010年数据。
+
+```{r}
+family <- read_dta("../data/2010AllData/cfps2010famconf_report_nat092014.dta",
+  encoding = "GB2312"
+)
+```
+
+
+
+# 选取变量
+
+筛选**家庭关系表**中相关的变量
+
+
+```{r}
+pre_family <- family %>%
+  dplyr::select(
+    fid,
+    pid,
+    pid_f,
+    pid_m,
+    pid_s,
+    starts_with("pid_c"),
+    gap_fam
+  )
+
+df <- pre_family
+```
+
+
+
+
+# subfunction
+
+```{r}
+getHierarchy <- function(df) {
+
+  # check
+  # cat("we are processing pid = ", df$pid %>% .[1], "\n")
+  glue::glue("we are processing pid = {df$pid %>% .[1]}")
+
+  # 单身汉
+  if (nrow(df) == 1) {
+    newdf <- df %>% mutate(Hierarchy = 1)
+  } else {
+
+    # extracting named vector from dataframe
+    hi <- df %>%
+      mutate(hi = -8) %>%
+      select(pid, hi) %>%
+      deframe()
+
+    # 定义家庭成员关系
+    frs <- c(
+      pid_f = 1,
+      pid_m = 1,
+      pid_s = 0,
+      pid_c1 = -1,
+      pid_c2 = -1,
+      pid_c3 = -1,
+      pid_c4 = -1,
+      pid_c5 = -1,
+      pid_c6 = -1,
+      pid_c7 = -1,
+      pid_c8 = -1,
+      pid_c9 = -1,
+      pid_c10 = -1
+    )
+
+
+    # 变成pivot_longer 将（从上到下，从左到右）的遍历，只需要一次从上到下
+    re_df <- df %>%
+      select(-gap_fam) %>%
+      pivot_longer(-pid, names_to = "relation", values_to = "who") %>% # gather("relation", "who", -pid)
+      filter(who != -8) %>%
+      select(pid, who, relation) %>%
+      mutate(res = frs[relation])
+
+    # 特殊情况处理：孤立两个个体，也有可能是彼此不想认
+    if (nrow(re_df) == 0) {
+      newdf <- df %>% mutate(Hierarchy = NA)
+    }
+    else {
+
+      # 没有扩散到情况，需要程序多跑一次
+      re_df <- bind_rows(re_df, re_df)
+
+      # 一行一行的处理
+      for (i in 1:nrow(re_df)) {
+        pid <- re_df[i, "pid"] %>% pull() %>% glue::glue()
+        who <- re_df[i, "who"] %>% pull() %>% glue::glue()
+        res <- re_df[i, "res"] %>% pull()
+
+        # print(pid)
+        # print(who)
+
+        if (i == 1) {
+          hi[pid] <- 0
+        }
+
+        if (hi[pid] == -8) {
+          next
+        }
+
+        if (hi[who] == -8) {
+          hi[who] <- hi[pid] + res
+        }
+      }
+
+      # 让辈分最小的Hierarchy为1
+      newdf <- df %>% mutate(Hierarchy = hi - min(hi) + 1)
+    } # end_of_else 2
+    
+  } # end_of_else 1
+
+  return(newdf)
+}
+```
+
+# 特殊情况
+
+```{r}
+scase <- df %>%
+  zap_labels() %>%
+  filter(fid %in% c("411250"))
+scase
+```
+
+```{r}
+ df %>%
+  zap_labels() %>%
+  group_by(fid) %>%
+  filter(fid %in% c("411250")) %>%
+  # group_map 会隐去grouping variable fid
+  group_map(~ getHierarchy(.))
+```
+
+
+# 获取家庭代际关系
+(数据有点大，可能要花费5分钟时间)
+
+```{r}
+dfs <- df %>%
+  zap_labels() %>%
+  group_by(fid) %>%
+  # group_map 会隐去fid (.y = grouping variable)
+  group_map(~ getHierarchy(.))
+```
+
+
+```{r}
+dfs %>% write_csv("gen_fam.csv")
+#dfs %>% write_rds("gen_fam.rds")
+```
+
+
+```{r}
+gen_fam <- read_csv("gen_fam.csv")
+#gen_fam <- read_rds("gen_fam.rds")
+```
+
+
+# 检查
+```{r}
+#head(gen_fam)
+err_df <- gen_fam %>% group_by(fid) %>% 
+  filter(max(Hierarchy) != max(gap_fam)) #%>% 
+ # write_csv("errfam.csv")
+err_df
+```
+
+
+检查错误背后的原因
+## way 1
+
+给孤立的个体打上标记
+
+```{r}
+library(purrr)
+
+is_eight <- function(...) if_else(all(... == -8), 1, 0)
+
+te <- err_df %>% 
+	ungroup() %>% 
+  mutate(www = pmap_dbl(select(., starts_with("pid_")), lift_vd(is_eight)))
+te
+```
+
+
+家庭中没有孤立的个体，为什么还会出现错误Hierarchy?
+那么就把没有孤立个体的但又报错的家庭找出来
+```{r}
+ro <- te %>% 
+  group_by(fid) %>% 
+	filter(all(www == 0)) 
+ro
+```
+
+## way 2
+
+如果是孤立的(即与其他家庭人员的关系全部为-8)， 那么标记www = 1
+```{r}
+te1 <- err_df %>% 
+    pivot_longer(starts_with("pid_"), names_to = "f", values_to = "n") %>% 
+    group_by(fid, pid) %>% 
+	  mutate(www = if_else(all(n == -8), 1, 0)) %>% 
+    pivot_wider(names_from = f, values_from = n)
+
+te1
+```
+
+www = 1 代表孤立的个体，
+看看一个家庭里没有孤立的个体(www 全部为0 )，为什么还有不正常的Hierarchy
+```{r}
+ro1 <- te %>% 
+  group_by(fid) %>% 
+	filter(all(www == 0)) %>% 
+  select(fid, pid, starts_with("pid_"), gap_fam, Hierarchy, www)
+ro1
+```
+
+way1 和way2 代码的写法不同而已，结果是一样的。
+经过核对，发现导致这些错误的原因：
+- 一是有孤立的小团体（a和b 相认，c和d 相认， 但ab和cd 不相认）
+- 二是子不认父的情况
+- 三是关系填写错误
+
+# 总结说明
+
+不是算法的问题，是数据质量的问题。
+
+之前考虑过的**孤立个体**的情况，加上上面三种情况，我们总结如下；
+
+因为算法要求家庭成员关系是互补的，对关系错乱、组合家庭以及父子不相认等情况, 不能完全识别，因此导致输出的表格中会存在 Hierarchy 大于8 或者 Na. 
+
+- 关系错乱:   Hierarchy  < gen_fam
+- 孤立个体:   Hierarchy  >= 9
+- 孤立团体：  Hierarchy  >= 9
+- 子不认父：  Hierarchy  >= 9
+- 彼此不相认: Hierarchy  = NA 
+
+为了保证数据完整以及方便核对识别，先不做剔除，依然以这种形态保留，待后面与**成人表**合并时，我们再以**家庭为单位**统一删除。
+
+```{r}
+gen_fam %>% group_by(fid) %>% 
+  filter(max(Hierarchy) == max(gap_fam)) 
+```
+
+# 下一步工作
+- 与**成人表**合并
+- 建模
+- 分析
+

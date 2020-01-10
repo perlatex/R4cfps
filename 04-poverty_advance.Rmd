@@ -1,0 +1,298 @@
+# 社会资本与精准扶贫 {#poverty}
+
+
+
+社会资本与精准扶贫
+
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(here)
+library(fs)
+library(purrr)
+library(haven)
+library(broom)
+```
+
+
+## 数据导入
+我们选取了北京大学开放数据平台中的中国家庭追踪调查CFPS^[<http://opendata.pku.edu.cn/>]的2014年数据。
+```{r}
+cfps2014comm <- read_dta("./data/2014AllData/Cfps2014comm_170630.dta",
+  encoding = "GB2312"
+)
+
+cfps2014famecon <- read_dta("./data/2014AllData/Cfps2014famecon_170630.dta",
+  encoding = "GB2312"
+)
+
+cfps2014adult <- read_dta("./data/2014AllData/cfps2014adult_170630.dta",
+  encoding = "GB2312"
+)
+```
+
+
+
+## 选取变量
+
+村级数据
+```{r}
+df_community <- cfps2014comm %>%
+  dplyr::select(
+    cid14, ca0, ca2_s_1:ca2_s_15, ca201_a_1:ca201_a_16, cg2, cg201, ck205
+  )
+```
+
+家庭数据
+```{r}
+df_famecon <- cfps2014famecon %>%
+  dplyr::select(
+    fid14, cid14, fincome1_per, fa7_s_1:fa7_s_3, fa5, fa3, fa4,
+    fs6_s_1:fs6_s_15, fa9, ft6, ft601, ft602,
+    fml2014num, finance_asset
+  )
+```
+
+
+成人数据
+```{r}
+df_adult <- cfps2014adult %>%
+  dplyr::select(
+    pid, fid14, provcd14, cfps2012_latest_edu, # cid14,
+    cfps_birthy, qz208, qp605_s_1:qp605_s_5, qp201,
+    qn12012, qn12014, qn1011:qn1017, qn401_s_1:qn401_s_4, qea0
+  )
+```
+
+
+合并
+```{r}
+df_set <- df_adult %>%
+  left_join(df_famecon, by = "fid14") %>%
+  left_join(df_community, by = "cid14")
+```
+
+
+
+
+## 规整数据
+```{r}
+fun <- function(...) sum(c(...) > 0)
+
+deprivation_df <- df_set %>%
+  # 社区性质
+  filter(ca0 == 5) %>%
+  # 受教育程度
+  filter(cfps2012_latest_edu > 0) %>%
+  mutate(education = if_else(cfps2012_latest_edu == 1, 1, 0)) %>%
+  # 待人接物水平
+  filter(!is.na(qz208), qz208 > 0) %>%
+  mutate(treatment = if_else(qz208 < 5, 1, 0)) %>%
+  # 医疗保障
+  filter(!is.na(qp605_s_1), qp605_s_1 > 0) %>%
+  mutate(health_care = if_else(qp605_s_1 == 78, 1, 0)) %>%
+  # 健康状况
+  filter(!is.na(qp201), qp201 > 0) %>%
+  mutate(health_self = if_else(qp201 > 2, 1, 0)) %>%
+  # 人均纯收入
+  filter(!is.na(fincome1_per), fincome1_per >= 0) %>%
+  mutate(income_per = if_else(fincome1_per < 2300, 1, 0)) %>% # need confirmed
+  # 家庭住房情况
+  filter(!is.na(fa7_s_1), fa7_s_1 > 0) %>%
+  mutate(housing = if_else(fa7_s_1 != 78, 1, 0)) %>%
+  # 通电情况
+  filter(!is.na(fa5), fa5 > 0) %>%
+  mutate(electricity = if_else(fa5 <= 2, 1, 0)) %>%
+  # 饮水情况
+  filter(!is.na(fa3), fa3 > 0) %>%
+  mutate(water = if_else(fa3 %in% c(3, 4), 0, 1)) %>%
+  # 家用燃料
+  filter(!is.na(fa4), fa4 > 0) %>%
+  mutate(fuel = if_else(fa4 %in% c(1, 2, 77), 1, 0)) %>%
+  # 耐用消费品
+  filter_at(vars(starts_with("fs6_s_")), all_vars(!is.na(.))) %>%
+  mutate_at(vars(starts_with("fs6_s_")), funs(as.numeric)) %>%
+  mutate_at(vars(starts_with("fs6_s_")), ~ case_when(
+    .x %in% c(-8, 78) ~ 0,
+    TRUE ~ .x
+  )) %>%
+  mutate(consumer_sum = pmap_dbl(select(., starts_with("fs6_s_")), fun)) %>%
+  mutate(consumer_durables = if_else(consumer_sum > 3, 0, 1)) %>%
+  # 垃圾处理
+  filter(!is.na(fa9), fa9 > 0) %>%
+  mutate(garbage = if_else(fa9 %in% c(1, 7), 0, 1)) %>%
+  # 生活满意度
+  filter(!is.na(qn12012), qn12012 > 0) %>%
+  mutate(life_satisfaction = if_else(qn12012 < 3, 1, 0)) %>%
+  # 未来信心度
+  filter(!is.na(qn12014), qn12014 > 0) %>%
+  mutate(confidence = if_else(qn12014 < 3, 1, 0)) %>%
+  # 社会公平感
+  filter_at(vars(starts_with("qn101")), all_vars(!is.na(.))) %>%
+  mutate(unfair = if_else(qn1011 == 1 | qn1012 == 1 | qn1013 == 1 | qn1014 == 1 | qn1015 == 1 | qn1016 == 1 | qn1017 == 1, 1, 0)) %>%
+  # 亲友借款额
+  filter(!ft601 %in% c(-2, -1, NA)) %>%
+  mutate_at(vars(ft601), funs(as.numeric)) %>%
+  mutate(borrowing1 = if_else(ft601 < 0, 0, ft601)) %>%
+  # 民间借款额
+  filter(!ft602 %in% c(-1, NA)) %>%
+  mutate_at(vars(ft602), funs(as.numeric)) %>%
+  mutate(borrowing2 = if_else(ft602 < 0, 0, ft602)) %>%
+  # 村庄设施拥有量
+  filter_at(vars(starts_with("ca201_a_")), all_vars(!. %in% c(-1, NA))) %>%
+  mutate_at(vars(starts_with("ca201_a_")), funs(as.numeric)) %>%
+  mutate_at(
+    vars(starts_with("ca201_a_")),
+    ~ case_when(
+      .x %in% c(-8, 78) ~ 0,
+      TRUE ~ .x
+    )
+  ) %>%
+  mutate(facility = pmap_dbl(select(., starts_with("ca201_a_")), sum)) %>%
+  # 村庄交通情况
+  # 距本县县城距离(里)
+
+  # 到本县县城时间(小时)
+  filter(!is.na(cg201), cg201 != -1) %>%
+  mutate_at(vars(cg201), funs(as.numeric)) %>%
+  mutate(traffic = if_else(cg201 < 0, 0, cg201)) %>%
+  # 村庄转移支付
+  filter(!is.na(ck205), ck205 != -1) %>%
+  mutate_at(vars(ck205), funs(as.numeric)) %>%
+  mutate(income_finance = if_else(ck205 == -8, 0, ck205)) %>%
+  # 家庭规模
+  filter(!is.na(fml2014num)) %>%
+  mutate(familysize = fml2014num) %>%
+  # 被调查者年龄
+  mutate(age = 2014 - cfps_birthy) %>%
+  # 家庭金融资产
+  filter(!is.na(finance_asset)) %>%
+  mutate(finance_asset = finance_asset) %>%
+  # 政治面貌
+  mutate(Political_landscape = if_else(qn401_s_1 == 1 | qn401_s_2 == 1 | qn401_s_3 == 1 | qn401_s_4 == 1, 0, 1)) %>%
+  # 婚姻情况
+  mutate(marriage = if_else(qea0 == 2, 1, 0)) %>%
+  #
+  select(
+    ################
+    pid, fid14, provcd14, ca0, cid14,
+    ################
+    education, treatment, health_care, health_self, life_satisfaction, confidence,
+    unfair, income_per, housing, electricity, water, fuel, consumer_durables,
+    garbage,
+    #################
+    age, Political_landscape, marriage, borrowing1, borrowing2, familysize,
+    finance_asset, facility, traffic, income_finance
+  )
+```
+
+
+
+
+## 权重系数
+```{r}
+weights <- c(
+  education = 0.1,
+  treatment = 0.1,
+  health_care = 0.1,
+  health_self = 0.1,
+  life_satisfaction = 0.067,
+  confidence = 0.067,
+  unfair = 0.067,
+  income_per = 0.2,
+  housing = 0.033,
+  electricity = 0.033,
+  water = 0.033,
+  fuel = 0.033,
+  consumer_durables = 0.033,
+  garbage = 0.033
+)
+
+df_wt <- deprivation_df %>%
+  gather(var, val, education:garbage) %>%
+  mutate(weighted_point = val * weights[var]) %>%
+  group_by(pid) %>%
+  summarise(weighted_sum = sum(weighted_point))
+
+data <- deprivation_df %>%
+  left_join(df_wt) %>%
+  select(
+    ################
+    weighted_sum,
+    ################
+    age, Political_landscape, marriage, borrowing1, borrowing2,
+    familysize, finance_asset, facility, traffic, income_finance
+  )
+```
+
+
+
+## 建模
+
+
+加入模型之前，有两点需要考虑
+
+- 是否需要转换因子类型？
+
+- 是否需要做标准化处理？
+
+## 可视化
+
+```{r message=FALSE, warning=FALSE}
+data %>%
+  gather(varsname, value) %>%
+  ggplot(aes(x = value)) +
+  geom_density() +
+  facet_wrap(vars(varsname), scales = "free")
+```
+
+```{r message=FALSE, warning=FALSE}
+data %>%
+  ggplot(aes(x = borrowing2, y = weighted_sum)) +
+  geom_point()
+```
+
+## 相关性
+```{r message=FALSE, warning=FALSE}
+library(corrr)
+data %>% correlate() %>% stretch()
+# data %>% correlate()  %>% rearrange()
+```
+
+## 线性回归模型
+
+```{r message=FALSE, warning=FALSE}
+lm_mod <- lm(weighted_sum ~ ., data = data)
+tidy(lm_mod)
+```
+
+
+## Probit 模型
+
+$$ \Pr(Y=1 \mid X) = \Phi(X^T\beta), $$
+
+这里 $\Phi$ 为累积分布函数.
+
+```{r message=FALSE, warning=FALSE}
+probit_mod <- glm(
+  formula = weighted_sum ~ .,
+  family = binomial(link = "probit"), # canonical link function
+  data = data
+)
+
+tidy(probit_mod)
+```
+
+
+
+## 下一步工作
+
+- 时间：增加2016年数据
+- 区域：分省份
+- 建模：为什么用二次项？
+- 理论：n型分布的理论支撑
+
+
+模型是工具，主要用来探索变量之间的关系，
+先画一个 x= browwing , y = 平穷的图
+为什么构造平方项，得证明 x 和x + I(x^2) + I(x^3) 都没有2好x + I(x^2) 

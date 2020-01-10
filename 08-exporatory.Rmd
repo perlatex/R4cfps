@@ -1,0 +1,99 @@
+---
+title: "获取家庭关系表中的代际关系"
+author: "王杰，王敏杰"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document: 
+    extra_dependencies:
+      ctex: UTF8
+      sourcecodepro: scale = 0.85
+      sourceserifpro: default
+    fig_caption: yes
+    latex_engine: xelatex
+    number_sections: yes
+classoptions: "hyperref, 12pt, a4paper"    
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  comment = "#>",
+  collapse = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # cache = TRUE,
+  out.width = "76%",
+  fig.align = "center",
+  fig.width = 8,
+  fig.asp = 0.618, # 1 / phi
+  fig.show = "hold"
+)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(here)
+library(fs)
+library(purrr)
+library(haven)
+library(broom)
+```
+
+
+
+
+
+# 1
+```{r}
+cfps2010adult <- read_dta("../data/2010AllData/cfps2010adult_report_nat092014.dta",
+  encoding = "GB2312"
+)
+cfps2010adult %>% sjPlot::view_df()
+```
+
+
+
+# 2
+```{r}
+cfps2010child <- read_dta("../data/2010AllData/cfps2010child_report_nat092014.dta",
+  encoding = "GB2312"
+)
+cfps2010child %>% sjPlot::view_df()
+```
+
+
+
+# 3
+```{r}
+cfps2010comm <- read_dta("../data/2010AllData/cfps2010comm_report_nat092014.dta",
+  encoding = "GB2312"
+)
+cfps2010comm %>% sjPlot::view_df()
+```
+
+
+
+
+# 4
+```{r}
+cfps2010famconf <- read_dta("../data/2010AllData/cfps2010famconf_report_nat092014.dta",
+  encoding = "GB2312"
+)
+cfps2010famconf %>% sjPlot::view_df()
+```
+
+
+
+
+# 5
+```{r}
+cfps2010family <- read_dta("../data/2010AllData/cfps2010family_report_nat092014.dta",
+  encoding = "GB2312"
+)
+cfps2010family %>% sjPlot::view_df()
+```
+
+

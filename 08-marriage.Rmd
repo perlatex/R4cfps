@@ -1,0 +1,74 @@
+---
+title: "教育人力资本的代际传递研究"
+author: "王敏杰"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document: 
+    extra_dependencies:
+      ctex: UTF8
+      sourcecodepro: scale = 0.85
+      sourceserifpro: default
+    fig_caption: yes
+    latex_engine: xelatex
+    number_sections: yes
+classoptions: "hyperref, 12pt, a4paper"    
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  comment = "#>",
+  collapse = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # cache = TRUE,
+  out.width = "76%",
+  fig.align = "center",
+  fig.width = 8,
+  fig.asp = 0.618, # 1 / phi
+  fig.show = "hold"
+)
+```
+
+本文重复南京大学的《教育人力资本的代际传递研究》
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(here)
+library(fs)
+library(purrr)
+library(haven)
+library(broom)
+```
+
+
+# 摘要
+
+
+# 数据
+```{r}
+cfps2016adult <- read_dta("../data/2016AllData/cfps2016adult_201808.dta",
+  encoding = "GB2312"
+)
+cfps2016adult %>% sjPlot::view_df()
+```
+
+# 配偶认识方式`qea204`
+```{r}
+label_df <- cfps2016adult  %>% 
+   select(qea204) %>%
+   surveytoolbox::extract_vallab("qea204")
+
+label_df
+```
+
+
+
+
+```{r}
+cfps2016adult  %>% 
+   select(qea204) %>%
+   count(qea204) %>%
+   left_join(label_df, by = c("qea204" = "id") )
+```

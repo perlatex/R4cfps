@@ -1,0 +1,314 @@
+---
+title: "教育人力资本的代际传递研究"
+author: "王敏杰"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document: 
+    extra_dependencies:
+      ctex: UTF8
+      sourcecodepro: scale = 0.85
+      sourceserifpro: default
+    fig_caption: yes
+    latex_engine: xelatex
+    number_sections: yes
+classoptions: "hyperref, 12pt, a4paper"    
+---
+
+本文系重复南京大学的《教育人力资本的代际传递研究》
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  comment = "#>",
+  collapse = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # cache = TRUE,
+  out.width = "76%",
+  fig.align = "center",
+  fig.width = 8,
+  fig.asp = 0.618, # 1 / phi
+  fig.show = "hold"
+)
+```
+
+
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(here)
+library(fs)
+library(purrr)
+library(haven)
+library(broom)
+```
+
+
+# 摘要
+
+改革开放以来,我国经济社会得到飞速发展,但是也存在着贫富差距加大和社会阶层固化等问题。代际传递是影响社会流动的一个重要方面。教育代际传递性越强说明教育代际流动性越差,社会阶层固化现象越严重。教育人力资本作为人力资本的重要部分,受教育水平的高低往往代表一个人的人力资本存量水平。本文采用2016年的中国家庭追踪调查数据(CFPS),来对教育人力资本的代际传递问题进行研究,在相关理论基础上,主要运用描述性统计、教育代际转换矩阵和有序logit回归进行实证分析。本文不仅对整体样本进行回归分析,还对样本进行分类分析。研究结果表明,父母的受教育程度对子女的受教育水平有显著的正向影响,母亲相对父亲影响作用更大,母亲的受教育水平提高时,子女处于低水平学历的概率减少的更多,处于高水平的学历的概率增加的更大。对家庭内部而言,当父母的受教育水平相匹配时,更有利于子女的受教育水平的提高。从子女的性别差异来看,当父母的整体受教育程度提高时,女性的受教育水平向上提高一个级别的概率更大,而且女性接受高等教育的可能性也更大。从教育代际流动性来看,农村的教育代际流动性低于城市,西部地区的教育代际流动性低于中部和东部地区,70后群体的教育代际流动性低于80后群体。总体来说,我国教育代际流动性增强,教育不公平性降低,但是我国教育在城乡和区域之间还存在较大差异。
+
+# 思路
+
+- 成人表，限定：出生日期在1970年到1989年这段时间的被调查者
+- 家庭关系表，找到被调查者父母的pid
+- 最后成人表中根据父母的pid，找到父母的教育情况
+- 形成数据框 pid,  edu,  mother_pid,  father_pid,  mother_edu,  father_edu
+- lmm模型
+
+
+# 数据
+
+## 成人表
+```{r}
+cfps2016adult <- read_dta("../data/2016AllData/cfps2016adult_201808.dta",
+  encoding = "GB2312"
+)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+cfps2016adult %>% sjPlot::view_df()
+```
+
+
+
+筛选**成人表**中相关的变量
+
+```{r}
+pre_adult <- cfps2016adult %>%
+  dplyr::select(
+    pid,                  # 个人ID
+    # fid16,              # 2016年家庭样本编码
+    # provcd16,           # 2016年省国标码
+    # countyid16,         # 2016年区县顺序码
+    # urban16,            # 基于国家统计局资料的城乡分类
+    cfps_birthy,          # 出生年份
+    cfps_gender,          # 性别
+    cfps_age,             # 年龄
+    qp201,                # 健康状况
+    qea0,                 # 当前婚姻状态
+    qn4001,               # 是否是党员
+    pa301	                # 现在的户口状况
+  ) %>%
+  filter(between(cfps_birthy, 1970, 1989))
+
+pre_adult
+```
+
+
+
+
+
+
+## 家庭关系表
+
+```{r}
+cfps2016famconf <- read_dta("../data/2016AllData/cfps2016famconf_201804.dta",
+  encoding = "GB2312"
+)
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+cfps2016famconf %>% sjPlot::view_df()
+```
+
+
+筛选**家庭关系表**中相关的变量
+
+
+```{r}
+pre_family <- cfps2016famconf %>%
+  dplyr::select(
+    pid,                 # 个人样本编码
+    # fid16,             # 2016年家庭样本编码
+    fid_provcd16,        # 2016年省国标码
+    # fid_countyid16,    # 2016年区县顺序码
+    fid_urban16,         # 基于国家统计局资料的城乡分类
+    tb4_a16_p,           # 个人最高学历
+    tb4_a16_f,           # 父亲最高学历
+    tb4_a16_m            # 母亲最高学历
+  )
+
+pre_family
+```
+
+
+## 合并
+
+```{r}
+df_set <- pre_adult %>% left_join(pre_family, by = "pid")
+df_set
+```
+
+
+
+
+```{r}
+df_set %>%
+  map(~ count(data.frame(x = .x), x))
+```
+
+
+```{r}
+df_set %>% colnames()
+```
+
+```{r}
+df_set %>%
+  count(pa301)
+```
+
+
+
+```{r}
+a <- df_set %>%
+  count(fid_provcd16) %>%
+  surveytoolbox::extract_vallab("fid_provcd16")
+
+b <- df_set %>%
+  count(fid_provcd16)
+
+w <- b %>% left_join(a, by = c("fid_provcd16" = "id") )
+w
+```
+
+
+```{r}
+w %>% filter(n < 100) %>% 
+      mutate(sum = sum(n))
+```
+
+中国34个省级行政区：
+
+- 中部地区，包括湖北42、湖南43、河南41、安徽34、江西36、山西14六个相邻省份
+- 西部地区，包括西藏54、新疆65、青海63、甘肃62、宁夏64、云南53、贵州52、四川51、陕西61、重庆50、广西45、内蒙古15
+- 东部地区，包括广东44、福建35、浙江33、江苏32、山东37、上海31、北京11、天津12、河北13
+
+- 其他地区，辽宁省21、吉林省22、黑龙江省23、海南省46
+
+
+```{r}
+tb <- df_set %>%
+  # 区域
+  # mutate(region = case_when(
+  #   fid_provcd16 %in% c(-1, -2) ~ eastern,
+  #   fid_provcd16 %in% c(-8) ~ central,
+  #   fid_provcd16 %in% c(-8) ~ western,
+  #   TRUE ~ other
+  # )) %>%
+  
+  # 城乡分类
+  filter(fid_urban16 %in% c(0, 1)) %>%
+  
+  # 现在的户口状况
+  filter(pa301 %in% c(1, 3)) %>%
+
+  # 健康状态
+  filter(qp201 %in% c(1, 2, 3, 4, 5)) %>%
+  
+  # 当前婚姻状态
+  filter(qea0 %in% c(1, 2, 3, 4, 5)) %>%
+  
+  # 是否是党员
+  filter(qn4001 %in% c(1, 0)) %>%
+  
+  # 个人最高学历
+  #filter(tb4_a16_p %in% 1:8) %>%
+  
+  # # 父亲最高学历
+   #filter(!tb4_a16_f %in% c(-9, -8, -1, 0)) %>%
+  
+  # # 母亲最高学历
+   #filter(!tb4_a16_m %in% c(-9, -8, -1, 0)) %>%
+  
+  # 学历
+  filter_at(vars(tb4_a16_p:tb4_a16_m), all_vars(. %in% 1:8) ) %>% 
+  
+  
+  identity()
+
+tb
+```
+
+
+
+
+
+```{r}
+library(summarytools) 
+
+view(dfSummary(tb))
+```
+
+
+# 代际转换矩阵分析
+```{r}
+tb1.1 <- tb %>% 
+  haven::zap_labels() %>% 
+  mutate_at(
+    vars(tb4_a16_p:tb4_a16_m),
+    list(~ case_when(
+      . %in% c(5, 6, 7, 8) ~ 5,
+      TRUE ~ .
+    ))
+  ) 
+
+tb1.1
+```
+
+
+
+```{r}
+tb1.1 %>% 
+  count(tb4_a16_m, tb4_a16_f) %>% 
+  group_by(tb4_a16_m) %>% 
+  mutate(percent = n/sum(n) ) %>% 
+  select(-n) %>% 
+  pivot_wider(names_from = tb4_a16_f,
+              values_from = percent)
+```
+
+```{r}
+tb1.1 %>% 
+  count(tb4_a16_m, tb4_a16_p) %>% 
+  group_by(tb4_a16_m) %>% 
+  mutate(percent = n/sum(n) ) %>% 
+  ggplot(aes(x = tb4_a16_p, y = tb4_a16_m, fill = percent)) + 
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "black")
+```
+
+```{r}
+library(ggridges)
+tb1.1 %>% 
+  mutate_at(vars(tb4_a16_m), as.factor) %>% 
+  ggplot(aes(x = tb4_a16_p, y = tb4_a16_m)) +
+  geom_density_ridges(scale = 4) + 
+  scale_x_continuous(limits = c(0, 6), breaks = c(1:5)) +
+  labs(title = "家庭中母亲的教育程度对子女的影响",
+       subtitle = "数字越大，教育程度越高",
+       x = "子女的教育程度", 
+       y = "母亲的教育程度")
+```
+
+
+```{r}
+tb1.1 %>% 
+  count(tb4_a16_m, tb4_a16_p) %>% 
+  group_by(tb4_a16_m) %>% 
+  mutate(percent = n/sum(n) ) %>%
+  ungroup() %>% 
+  mutate_at(vars(tb4_a16_m:tb4_a16_p), as.factor) %>% 
+  mutate_at(vars(tb4_a16_m), ~forcats::fct_rev(.)) %>% 
+  ggplot(aes(x = tb4_a16_p, y = percent)) +
+  geom_col() + 
+  facet_grid(vars(tb4_a16_m), switch = "y") +
+  labs(title = "家庭中母亲的教育程度对子女的影响",
+       subtitle = "数字越大，教育程度越高",
+       x = "子女的教育程度", 
+       y = "母亲的教育程度")
+```
+

@@ -1,0 +1,139 @@
+---
+title: "家庭关系表"
+author: "王敏杰"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document: 
+    extra_dependencies:
+      ctex: UTF8
+      sourcecodepro: scale = 0.85
+      sourceserifpro: default
+    fig_caption: yes
+    latex_engine: xelatex
+    number_sections: yes
+classoptions: "hyperref, 12pt, a4paper"    
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  comment = "#>",
+  collapse = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # cache = TRUE,
+  out.width = "76%",
+  fig.align = "center",
+  fig.width = 8,
+  fig.asp = 0.618, # 1 / phi
+  fig.show = "hold"
+)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(here)
+library(fs)
+library(purrr)
+library(haven)
+library(broom)
+```
+
+## 家庭关系表2010
+```{r}
+cfps2010famconf <- read_dta("../data/2010AllData/cfps2010famconf_report_nat092014.dta",
+  encoding = "GB2312"
+)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+cfps2010famconf %>% sjPlot::view_df()
+```
+
+
+
+筛选**家庭关系表**中相关的变量
+```{r}
+pre_family <- cfps2010famconf %>%
+  dplyr::select(
+    fid,
+    pid,
+    pid_f,
+    pid_m,
+    pid_s,
+    starts_with("pid_c"),
+    gap_fam
+  )
+
+df <- pre_family
+```
+
+
+
+
+## 成人表
+```{r}
+cfps2016adult <- read_dta("../data/2016AllData/cfps2016adult_201808.dta",
+  encoding = "GB2312"
+)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+cfps2016adult %>% sjPlot::view_df()
+```
+
+
+## 家庭关系表2016
+
+```{r}
+cfps2016famconf <- read_dta("../data/2016AllData/cfps2016famconf_201804.dta",
+  encoding = "GB2312"
+)
+```
+
+
+
+
+```{r eval=FALSE, include=FALSE}
+cfps2016famconf %>% sjPlot::view_df()
+```
+
+
+筛选**家庭关系表**中相关的变量
+```{r}
+tb <- cfps2016famconf %>%
+  dplyr::select(
+    fid16,
+    pid,
+    pid_f,
+    pid_m,
+    pid_s,
+    starts_with("pid_c"),
+    starts_with("tb4_a16_c"),
+    familysize16 #家庭人口规模
+    
+  )
+
+```
+
+```{r}
+get_children_num <- function(...){
+  c(...) %in% c(-10, -9,-8,-2, -1, 77, 79) %>% sum()
+  
+}
+
+tb %>% 
+  mutate(children_num = pmap_dbl(select(., starts_with("pid_c")), get_children_num)) 
+```
+
+
+```{r eval=FALSE, include=FALSE}
+tb %>% sjPlot::view_df()
+```
+
+

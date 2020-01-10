@@ -1,0 +1,1012 @@
+---
+title: "教育代际传递"
+author: "王敏杰"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document: 
+    extra_dependencies:
+      ctex: UTF8
+      sourcecodepro: scale = 0.85
+      sourceserifpro: default
+    fig_caption: yes
+    latex_engine: xelatex
+    number_sections: yes
+classoptions: "hyperref, 12pt, a4paper"    
+---
+
+
+
+
+
+本文系重复南京大学的《教育人力资本的代际传递研究》
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  comment = "#>",
+  collapse = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  # cache = TRUE,
+  out.width = "76%",
+  fig.align = "center",
+  fig.width = 8,
+  fig.asp = 0.618, # 1 / phi
+  fig.show = "hold"
+)
+```
+
+
+
+```{r message = FALSE, warning = FALSE}
+library(tidyverse)
+library(here)
+library(fs)
+library(purrr)
+library(haven)
+library(broom)
+```
+
+
+# 摘要
+
+改革开放以来,我国经济社会得到飞速发展,但是也存在着贫富差距加大和社会阶层固化等问题。代际传递是影响社会流动的一个重要方面。教育代际传递性越强说明教育代际流动性越差,社会阶层固化现象越严重。教育人力资本作为人力资本的重要部分,受教育水平的高低往往代表一个人的人力资本存量水平。本文采用2016年的中国家庭追踪调查数据(CFPS),来对教育人力资本的代际传递问题进行研究,在相关理论基础上,主要运用描述性统计、教育代际转换矩阵和有序logit回归进行实证分析。本文不仅对整体样本进行回归分析,还对样本进行分类分析。研究结果表明,父母的受教育程度对子女的受教育水平有显著的正向影响,母亲相对父亲影响作用更大,母亲的受教育水平提高时,子女处于低水平学历的概率减少的更多,处于高水平的学历的概率增加的更大。对家庭内部而言,当父母的受教育水平相匹配时,更有利于子女的受教育水平的提高。从子女的性别差异来看,当父母的整体受教育程度提高时,女性的受教育水平向上提高一个级别的概率更大,而且女性接受高等教育的可能性也更大。从教育代际流动性来看,农村的教育代际流动性低于城市,西部地区的教育代际流动性低于中部和东部地区,70后群体的教育代际流动性低于80后群体。总体来说,我国教育代际流动性增强,教育不公平性降低,但是我国教育在城乡和区域之间还存在较大差异。
+
+# 思路
+
+- 成人表，限定：出生日期在1970年到1989年这段时间的被调查者
+- 家庭关系表，找到被调查者父母的pid
+- 最后成人表中根据父母的pid，找到父母的教育情况
+- 形成数据框 pid,  edu,  mother_pid,  father_pid,  mother_edu,  father_edu
+- lmm模型
+
+高等教育代际传递：
+
+- 人力资本
+- 社会资本
+- 70后、80后年龄段
+- 子女性别
+- 父母教育程度
+- 父母特征（离异，单亲， 收入）
+- 地区
+- 城乡
+- 少数民族
+- 户籍
+
+# 数据
+
+## 成人表
+```{r}
+cfps2016adult <- read_dta("../data/2016AllData/cfps2016adult_201808.dta",
+  encoding = "GB2312"
+)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+cfps2016adult %>% sjPlot::view_df()
+```
+
+
+
+筛选**成人表**中相关的变量
+
+```{r}
+pre_adult <- cfps2016adult %>%
+  dplyr::select(
+    pid,                  # 个人ID
+    # fid16,              # 2016年家庭样本编码
+    # provcd16,           # 2016年省国标码
+    # countyid16,         # 2016年区县顺序码
+    # urban16,            # 基于国家统计局资料的城乡分类
+    cfps_birthy,          # 出生年份
+    cfps_gender,          # 性别
+    cfps_age,             # 年龄
+    qp201,                # 健康状况
+    qea0,                 # 当前婚姻状态
+    qn4001,               # 是否是党员
+    pa301	                # 现在的户口状况
+  ) %>%
+  filter(between(cfps_birthy, 1970, 1989))
+
+pre_adult
+```
+
+
+
+
+
+
+## 家庭关系表
+
+```{r}
+cfps2016famconf <- read_dta("../data/2016AllData/cfps2016famconf_201804.dta",
+  encoding = "GB2312"
+)
+```
+
+
+
+```{r eval=FALSE, include=FALSE}
+cfps2016famconf %>% sjPlot::view_df()
+```
+
+
+
+## 获取家庭兄弟姐妹的数量
+
+筛选**家庭关系表**中相关的变量
+```{r}
+pre_family <- cfps2016famconf %>%
+  dplyr::select(
+    pid,                 # 个人样本编码
+    fid16,               # 2016年家庭样本编码
+    fid_provcd16,        # 2016年省国标码
+    # fid_countyid16,    # 2016年区县顺序码
+    fid_urban16,         # 基于国家统计局资料的城乡分类
+    tb4_a16_p,           # 个人最高学历
+    tb4_a16_f,           # 父亲最高学历
+    tb4_a16_m,           # 母亲最高学历
+    pid_f,
+    pid_m,
+    pid_s,
+    starts_with("pid_c"),
+    starts_with("tb4_a16_c"),
+    familysize16           #家庭人口规模
+  )
+
+pre_family
+```
+
+
+### 方法1
+
+思路：从上往下
+
+
+```{r}
+family1.0 <- pre_family %>%
+  dplyr::select(
+    pid,                 # 个人样本编码
+    starts_with("pid_c")
+  )
+
+family1.0
+```
+
+```{r}
+family1.1 <- family1.0 %>% 
+  haven::zap_labels() %>% 
+  mutate_at(
+    vars(starts_with("pid_c")),
+    list(~ case_when(
+      . %in% c(-10, -9, -8,-2, -1, 77, 79) ~ NA_real_,
+      TRUE ~ .
+    ))
+  ) 
+
+family1.1
+```
+
+相当于很多个三叉树的结构
+
+
+```{r}
+family1.2 <- family1.1 %>% 
+  pivot_longer(cols = -pid, names_to = "seq_children", values_to = "children") %>% 
+  filter(!is.na(children)) %>% 
+  distinct_at(vars(pid, children), .keep_all = TRUE) %>% 
+  group_by(pid) %>% 
+  add_count() %>% 
+  ungroup()
+
+ 
+family1.2  
+```
+
+
+```{r}
+family1.3 <- family1.2 %>% 
+  distinct_at(vars(children, n), .keep_all = FALSE)  %>% 
+  rename(pid = children, num_siblings = n)
+
+family1.3
+```
+
+```{r}
+family1.3 %>% select(pid) %>% n_distinct()
+```
+
+```{r}
+family1.3 %>% count(num_siblings)
+```
+
+
+```{r}
+family1.4 <- pre_family %>% 
+  left_join(family1.3, by = "pid") #%>% 
+  #filter(num_siblings > 2)
+
+family1.4
+```
+
+这种存在，
+- 父亲认女儿，但女儿出嫁到其他家庭, 
+- 媳妇也认为女儿的情况，两个爹
+
+
+### 方法2
+
+思路：从下往上
+- 同一家庭，父亲母亲相同，就认为是兄弟姐妹。
+- 同父不同母的情况，这里没考虑
+- 缺失处理。因为媳妇和公公婆婆的父母都是NA，所以`vars(pid_f, pid_m)`, 至少一个不能NA，否则group后，媳妇和公公婆婆都是兄弟了
+- 夫妻也被认为是兄妹了
+
+```{r}
+family2.0 <- pre_family %>%
+  haven::zap_labels() %>% 
+  mutate_at(
+    vars(pid_f, pid_m),
+    list(~ case_when(
+      . %in% c(-10, -9, -8,-2, -1, 77, 79) ~ NA_real_,
+      TRUE ~ .
+    ))
+  ) %>% 
+  filter_at(vars(pid_f, pid_m), any_vars(!is.na(.)) ) %>% #至少一个不能NA
+  group_by(fid16, pid_f, pid_m) %>% 
+  add_count(name = "num_siblings") %>% #兄弟姐妹数量
+  ungroup()
+
+
+family2.0
+```
+
+
+```{r}
+family2.0 %>% count(num_siblings)
+```
+
+
+```{r}
+family2.1 <- family2.0 %>% 
+  filter(num_siblings > 2)
+
+family2.1
+```
+
+
+
+
+
+## 合并
+
+```{r}
+df_set <- pre_adult %>% 
+  left_join(family2.0, by = "pid")
+
+df_set
+```
+
+
+
+
+```{r, eval= FALSE}
+df_set %>%
+  map(~ count(data.frame(x = .x), x))
+```
+
+
+```{r}
+df_set %>% colnames()
+```
+
+```{r}
+df_set %>%
+  count(pa301)
+```
+
+
+
+```{r}
+a <- df_set %>%
+  count(fid_provcd16) %>%
+  surveytoolbox::extract_vallab("fid_provcd16")
+
+b <- df_set %>%
+  count(fid_provcd16)
+
+w <- b %>% left_join(a, by = c("fid_provcd16" = "id") )
+w
+```
+
+
+```{r}
+w %>% filter(n < 100) %>% 
+      mutate(sum = sum(n))
+```
+
+中国34个省级行政区：
+
+- 中部地区，包括湖北42、湖南43、河南41、安徽34、江西36、山西14六个相邻省份
+- 西部地区，包括西藏54、新疆65、青海63、甘肃62、宁夏64、云南53、贵州52、四川51、陕西61、重庆50、广西45、内蒙古15
+- 东部地区，包括广东44、福建35、浙江33、江苏32、山东37、上海31、北京11、天津12、河北13
+
+- 其他地区，辽宁省21、吉林省22、黑龙江省23、海南省46
+
+
+```{r}
+# `%not_in%` <- purrr::negate(`%in%`)
+# 
+# get_children_num <- function(...){
+#   c(...) %not_in% c(-10, -9,-8,-2, -1, 77, 79) %>% sum()
+#   
+# }
+
+
+tb <- df_set %>%
+  # 年代
+  mutate(generation = case_when(
+    between(cfps_birthy, 1970, 1979) ~ "70s",
+    between(cfps_birthy, 1980, 1989) ~ "80s",
+    TRUE ~ "other"
+  )) %>%
+  
+  # # 家庭子女数 # 要的是80s 70s的同辈，而不是7080s的下一代
+  # mutate(children_num = pmap_dbl(select(., starts_with("pid_c")), get_children_num)) %>% 
+  
+  # 区域
+  mutate(region = case_when(
+    fid_provcd16 %in% c(44, 35, 33, 32, 37, 31, 11, 12, 13) ~ "eastern",
+    fid_provcd16 %in% c(42, 43, 41, 34, 36, 14) ~ "central",
+    fid_provcd16 %in% c(54, 65, 63, 62, 64, 53, 52, 51, 61, 50, 45, 15) ~ "western",
+    TRUE ~ "other"
+  )) %>%
+  filter(!region %in% c("other")) %>% 
+  
+  # 城乡分类
+  filter(fid_urban16 %in% c(0, 1)) %>%
+  
+  # 现在的户口状况
+  filter(pa301 %in% c(1, 3)) %>%
+
+  # 健康状态
+  filter(qp201 %in% c(1, 2, 3, 4, 5)) %>%
+  
+  # 当前婚姻状态
+  filter(qea0 %in% c(1, 2, 3, 4, 5)) %>%
+  
+  # 是否是党员
+  filter(qn4001 %in% c(1, 0)) %>%
+  
+  # 个人最高学历
+  #filter(tb4_a16_p %in% 1:8) %>%
+  
+  # # 父亲最高学历
+   #filter(!tb4_a16_f %in% c(-9, -8, -1, 0)) %>%
+  
+  # # 母亲最高学历
+   #filter(!tb4_a16_m %in% c(-9, -8, -1, 0)) %>%
+  
+  # 学历
+  filter_at(vars(tb4_a16_p:tb4_a16_m), all_vars(. %in% 1:8) ) %>% 
+  
+  
+  identity()
+
+tb
+```
+
+```{r}
+tb %>% count(generation)
+```
+
+```{r, fig.showtext= TRUE}
+tb %>% 
+  mutate_at(vars(tb4_a16_p), as.factor) %>% 
+  ggplot(aes(x = tb4_a16_p)) +
+  geom_bar(scale = 4) 
+```
+
+
+```{r, eval= FALSE}
+library(summarytools) 
+
+view(dfSummary(tb))
+```
+
+
+# 代际转换矩阵分析
+```{r}
+tb1.1 <- tb %>% 
+  haven::zap_labels() %>% 
+  mutate_at(
+    vars(tb4_a16_p:tb4_a16_m),
+    list(~ case_when(
+      . %in% c(5, 6, 7, 8) ~ 5,
+      TRUE ~ .
+    ))
+  ) 
+
+tb1.1
+```
+
+
+
+```{r}
+tb1.1 %>% 
+  count(tb4_a16_m, tb4_a16_f) %>% 
+  group_by(tb4_a16_m) %>% 
+  mutate(percent = n/sum(n) ) %>% 
+  dplyr::select(-n) %>% 
+  pivot_wider(names_from = tb4_a16_f,
+              values_from = percent)
+```
+```{r}
+tb1.1 %>% 
+  count(tb4_a16_m, tb4_a16_f) %>% 
+  group_by(tb4_a16_m) %>% 
+  mutate(percent = n/sum(n) ) %>% 
+  ggplot(aes(x = tb4_a16_f, y = tb4_a16_m, fill = percent)) + 
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "black")
+```
+门当户对
+
+
+
+```{r}
+tb1.1 %>% 
+  count(tb4_a16_m, tb4_a16_p) %>% 
+  group_by(tb4_a16_m) %>% 
+  mutate(percent = n/sum(n) ) %>% 
+  ggplot(aes(x = tb4_a16_p, y = tb4_a16_m, fill = percent)) + 
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "black")
+```
+
+
+
+
+```{r, fig.showtext= TRUE}
+library(ggridges)
+tb1.1 %>% 
+  mutate_at(vars(tb4_a16_m), as.factor) %>% 
+  ggplot(aes(x = tb4_a16_p, y = tb4_a16_m)) +
+  geom_density_ridges(scale = 4) + 
+  scale_x_continuous(limits = c(0, 6), breaks = c(1:5)) +
+  labs(title = "家庭中母亲的教育程度对子女的影响",
+       subtitle = "数字越大，教育程度越高",
+       x = "子女的教育程度", 
+       y = "母亲的教育程度")
+```
+
+
+
+
+```{r, fig.showtext= TRUE}
+tb1.1 %>% 
+  count(tb4_a16_m, tb4_a16_p) %>% 
+  group_by(tb4_a16_m) %>% 
+  mutate(percent = n/sum(n) ) %>%
+  ungroup() %>% 
+  mutate_at(vars(tb4_a16_m:tb4_a16_p), as.factor) %>% 
+  mutate_at(vars(tb4_a16_m), ~forcats::fct_rev(.)) %>% 
+  ggplot(aes(x = tb4_a16_p, y = percent)) +
+  geom_col() + 
+  facet_grid(vars(tb4_a16_m), switch = "y") +
+  labs(title = "家庭中母亲的教育程度对子女的影响",
+       subtitle = "数字越大，教育程度越高",
+       x = "子女的教育程度", 
+       y = "母亲的教育程度")
+```
+
+
+
+
+#  有序logistic 回归分析
+Ordinal logistic regression model
+
+```{r, eval= FALSE}
+# xb = c(1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0)
+# lf = c(1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0)
+# lx = c(1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3)
+# ps = c(16, 5, 6, 6, 7, 19, 5, 2, 7, 1, 0, 10)
+# 
+# table <- data.frame(xb, lf, lx, ps)
+# 
+# library(MASS)
+# fit <- polr( as.ordered(lx) ~ xb + lf, weight = ps, Hess = T, data = table)
+# summary(fit)
+
+```
+
+
+
+
+```{r}
+tb1.2 <- tb1.1 %>% 
+  dplyr::select(
+    edu = tb4_a16_p,
+    f_edu = tb4_a16_f,
+    m_edu = tb4_a16_m,
+    sex =  cfps_gender,
+    urban = fid_urban16) %>% 
+  mutate_at(vars(edu, f_edu, m_edu, sex, urban), as.factor) %>% 
+  #mutate_at(vars(edu), ~fct_inorder(., ordered = TRUE))
+  mutate_at(vars(edu), ~fct_inseq(., ordered = TRUE))
+
+tb1.2
+```
+
+
+```{r}
+tb1.2 <- tb %>% 
+  haven::zap_labels() %>% 
+  dplyr::select(
+    edu = tb4_a16_p,
+    f_edu = tb4_a16_f,
+    m_edu = tb4_a16_m,
+    sex =  cfps_gender,
+    urban = fid_urban16,
+    num_siblings ) %>% 
+   mutate_at(vars(edu),
+    list(~ case_when(
+      . %in% c(5, 6, 7, 8) ~ 5,
+       TRUE ~ .
+      )) 
+    ) %>% 
+    mutate_at(vars(f_edu, m_edu),
+    list(~ case_when(
+                . == 1 ~ 1,
+                . == 2 ~ 6,
+                . == 3 ~ 9,
+                . == 4 ~ 12,
+                . == 5 ~ 15,
+                . == 6 ~ 16,
+                . == 7 ~ 19,
+                . == 8 ~ 22,
+                  TRUE ~ NA_real_
+                ))
+    )  %>% 
+   mutate_at(vars(edu, sex, urban), as.factor) %>% 
+   mutate_at(vars(edu), ~fct_inseq(., ordered = TRUE))  
+
+tb1.2
+```
+
+```{r}
+#tb1.2 %>% write_rds("tb1.2.rds")
+tb1.2 <- read_rds("tb1.2.rds")
+```
+
+
+```{r}
+tb1.2 %>% pull(edu) %>% levels()
+```
+
+## MASS包 polr
+```{r}
+library(MASS)
+# https://stats.idre.ucla.edu/r/dae/ordinal-logistic-regression/
+# https://towardsdatascience.com/implementing-and-interpreting-ordinal-logistic-regression-1ee699274cf5
+mod_mass <- polr(edu ~ f_edu + m_edu + sex + num_siblings + urban, 
+                 data = tb1.2, 
+                 Hess = TRUE)
+
+# summary(mod_mass)
+
+broom::tidy(mod_mass)
+```
+ 
+
+## ordinal 包
+
+```{r}
+library(ordinal)
+mod_ordinal <- clm(edu ~ f_edu + m_edu + sex + num_siblings + urban, 
+                   data = tb1.2, 
+                   link = "logit",
+                   thresholds = "flexible"
+                  )
+
+broom::tidy(mod_ordinal)
+```
+
+
+# Bayesian framework
+<https://kevinstadler.github.io/blog/bayesian-ordinal-regression-with-random-effects-using-brms/>
+```{r}
+tb1.3 <- tb1.2 #%>% mutate(edu = fct_inorder(edu, ordered = TRUE))
+#tb1.3
+```
+
+```{r message=TRUE, warning=TRUE, include=FALSE}
+# https://community.rstudio.com/t/factor-levels-order-true-in-forcats/8634/2
+# https://bookdown.org/ajkurz/Statistical_Rethinking_recoded/monsters-and-mixtures.html
+# https://discourse.mc-stan.org/t/ordinal-regression-model-in-brms/8446/5
+#
+
+library(brms)
+mod_brms <- brm(edu ~ f_edu + m_edu + sex + num_siblings + urban,
+                data = tb1.3,  
+                family = cumulative(link = "logit")
+               )
+```
+
+
+
+```{r, eval=FALSE}
+mod_brms2 <- brm(edu ~ f_edu + m_edu + sex + children_num,
+                data = tb1.3,  
+                family = cumulative(link = "logit"),
+                prior = c(prior(normal(0, 10), class = Intercept),
+                          prior(normal(0, 10), class = b)),
+                iter = 2000, warmup = 1000, cores = 2, chains = 2,
+                inits = 0
+               )
+```
+
+```{r, eval = F}
+bform <- bf(
+  Score ~ Species + Region + (1|ID),
+  disc ~ <your predictors>
+)
+M.SR <- brm(bform, data = IUULong, family = cumulative)
+```
+这个`disc`什么意思
+
+
+```{r, eval = FALSE}
+loo_compare(mod_brms,mod_brms2)
+```
+
+```{r}
+summary(mod_brms)
+```
+
+
+```{r}
+mod_brms %>% 
+  fixef() %>% 
+  inv_logit_scaled()
+```
+
+
+
+
+```{r}
+library(tidybayes)
+mod_brms %>% get_variables() 
+```
+
+
+```{r, eval= FALSE}
+mod_brms %>% posterior_samples()
+```
+
+
+
+```{r, eval= FALSE}
+plot(mod_brms)
+```
+
+
+```{r}
+p1 <- 
+  posterior_samples(mod_brms) %>% 
+  dplyr::select(starts_with("b_")) %>% 
+  mutate_all(inv_logit_scaled) %>% 
+  gather() %>% 
+  group_by(key) %>% 
+  summarise(mean = mean(value),
+            sd   = sd(value),
+            ll   = quantile(value, probs = .025),
+            ul   = quantile(value, probs = .975))
+p1
+```
+
+
+
+```{r}
+p <- 
+  posterior_samples(mod_brms) %>% 
+  dplyr::select(starts_with("b_")) %>% 
+  gather() %>% 
+  group_by(key) %>% 
+  summarise(mean = mean(value),
+            sd   = sd(value),
+            ll   = quantile(value, probs = .025),
+            ul   = quantile(value, probs = .975))
+
+p
+```
+
+
+
+# 对比
+```{r}
+a <- broom::tidy(mod_mass) %>% 
+  dplyr::select(term, polr = estimate) %>% 
+  mutate(key =  stringr::str_c("b_", term)) %>% 
+  mutate(key = case_when(
+    key == "b_1|2" ~ "b_Intercept[1]",
+    key == "b_2|3" ~ "b_Intercept[2]",
+    key == "b_3|4" ~ "b_Intercept[3]",
+    key == "b_4|5" ~ "b_Intercept[4]",
+    TRUE ~ key
+    )) %>% 
+  dplyr::select(-term)
+a
+```
+
+```{r}
+b <- 
+  broom::tidy(mod_ordinal) %>% 
+  dplyr::select(term, ordinal = estimate) %>% 
+  mutate(key =  stringr::str_c("b_", term)) %>% 
+  mutate(key = case_when(
+    key == "b_1|2" ~ "b_Intercept[1]",
+    key == "b_2|3" ~ "b_Intercept[2]",
+    key == "b_3|4" ~ "b_Intercept[3]",
+    key == "b_4|5" ~ "b_Intercept[4]",
+    TRUE ~ key
+    )) %>% 
+  dplyr::select(-term)
+b
+```
+
+```{r}
+c <- p %>% 
+  dplyr::select(key, brms_mean = mean)
+
+t <- a %>% 
+  left_join(b, by = "key") %>% 
+  left_join(c, by = "key")
+t
+```
+
+
+```{r}
+t %>% 
+  tidyr::pivot_longer(-starts_with("key"), names_to = "mod",  values_to = "values" ) %>%
+  ggplot(aes(x = values, y = key, color = mod)) +
+  geom_point()
+  
+```
+
+```{r}
+t %>% 
+  filter(stringr::str_detect(key, "^b_Intercept", negate = TRUE)) %>% 
+  tidyr::pivot_longer(-starts_with("key"), names_to = "mod",  values_to = "values" ) %>% 
+  ggplot(aes(x = values, y = key, color = mod)) +
+  geom_point()
+```
+
+
+```{r}
+t %>% 
+  filter(stringr::str_detect(key, "^b_Intercept", negate = FALSE)) %>% 
+  tidyr::pivot_longer(-starts_with("key"), names_to = "mod",  values_to = "values" ) %>% 
+  ggplot(aes(x = values, y = key, color = mod)) +
+  geom_point()
+```
+
+
+```{r}
+t %>% 
+  filter(stringr::str_detect(key, "^b_Intercept", negate = TRUE)) %>%
+  mutate(diff = ordinal - brms_mean)
+```
+
+
+# tidybayes
+
+```{r, eval= FALSE}
+# https://mjskay.github.io/tidybayes/articles/tidy-brms.html
+posterior_samples(mod_brms) %>% 
+  dplyr::select(starts_with("b_")) %>%  
+  gather() 
+```
+
+
+
+```{r}
+posterior_samples(mod_brms) %>% 
+  dplyr::select(starts_with("b_")) %>% 
+  gather() %>% 
+
+  ggplot(aes(x = value, y = reorder(key, value))) +
+  geom_halfeyeh(fill = "firebrick", 
+                point_interval = median_qi, .width = .95) +
+  labs(title    = "Sum the multicollinear coefficients",
+       subtitle = "Marked by the median and 95% PIs") +
+  theme_bw() +
+  theme(panel.grid   = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.y  = element_text(hjust = 0))
+```
+
+```{r, eval= FALSE}
+mod_brms %>% 
+  spread_draws(b_Intercept[condition]) 
+```
+
+
+
+```{r}
+mod_brms %>%
+  spread_draws(b_Intercept[condition]) %>%
+  group_by(condition) %>%   # this line not necessary (done by spread_draws)
+  median_qi(b_Intercept) 
+  #ggplot(aes(y = condition, x = b_Intercept)) +
+  #geom_halfeyeh()
+```
+
+## 理论依据
+- 理论公式
+- brms代码
+- 解释(不推翻freq的解释，增强版)
+
+输出结果得到有序分类 logistic 回归模型中截距和回归系数的
+最大似然估计值，确定出回归方程为：
+
+
+
+$$
+\begin{aligned}
+\text{logit}\left(p_{1}\right) &= \ln \left(\frac{p_{1}}{p_{2}+p_{3}}\right) = -2.667+1.319 x_{1} + 1.797 x_{2} \\ 
+\text{logit}\left(p_{1}+p_{2}\right) & =\ln
+\left(\frac{p_{1}+p_{2}}{p_{3}}\right) = -1.813+1.319 x_{1} + 1.797 x_{2}\\
+\end{aligned}
+$$
+
+
+然后`inv_logit_scaled`
+
+
+## 边际影响
+ margin effect of ordinal regression in r
+```{r message=FALSE, warning=FALSE}
+#library(mfx)
+#probitmfx(formula = weighted_sum ~ ., data = probit_data)
+```
+
+或者
+
+```{r}
+# https://r-posts.com/how-to-perform-ordinal-logistic-regression-in-r/
+#library("effects")
+#Effect(focal.predictors = "quality",mod_mass)
+```
+
+```{r}
+# https://github.com/leeper/margins
+library(margins)
+mod1 <- lm(mpg ~ cyl * hp + wt, data = mtcars)
+#(marg1 <- margins(mod1))
+#summary(marg1)
+marginal_effects(mod1, category = "wt")
+```
+
+
+
+```{r}
+# https://r-posts.com/how-to-perform-ordinal-logistic-regression-in-r/
+# library("effects")
+# Effect(focal.predictors = "quality",mod_mass)
+```
+
+
+```{r}
+# https://github.com/leeper/margins
+library(margins)
+mod1 <- lm(mpg ~ cyl * hp + wt, data = mtcars)
+(marg1 <- margins(mod1))
+summary(marg1)
+margins_summary(mod1)
+```
+
+```{r message=FALSE, warning=FALSE}
+library(margins)
+margins(mod_mass) %>% summary()
+```
+
+```{r message=FALSE, warning=FALSE}
+library(margins)
+#me_mass <- marginal_effects(mod_mass, variables = "sex")
+me_mass <- marginal_effects(mod_mass)
+
+```
+
+
+```{r}
+marginal_effects(margins(mod_mass))
+```
+
+
+
+## brms_margin
+```{r}
+# conditions <- data.frame(edu = 1:5)
+#me <- brms::marginal_effects(mod_brms, conditions = conditions)
+brms::marginal_effects(mod_brms, categorical = TRUE)
+```
+
+
+
+
+```{r}
+me_f_edu <- brms::marginal_effects(mod_brms, effect = "f_edu", categorical = TRUE)
+me_f_edu[[1]]
+```
+
+```{r}
+me_f_edu[[1]] %>% 
+  ggplot(aes(x = f_edu, y = estimate__,  colour = cats__)) + 
+  #geom_point(size = 4) +
+  geom_line(aes(group = cats__), size = 1) +
+  geom_smooth(aes(ymin = lower__, ymax = upper__, fill = cats__), 
+              stat = "identity")
+
+```
+
+```{r}
+me <- brms::marginal_effects(mod_brms, effect = "sex", categorical = TRUE)
+me[[1]]
+```
+
+
+
+
+```{r}
+## only plot the marginal interaction effect of 'zBase:Trt'
+## for different values for 'zAge'
+conditions <- data.frame(zAge = c(-1, 0, 1))
+plot(marginal_effects(fit, effects = "zBase:Trt",
+                      conditions = conditions))
+
+plot(marginal_effects(fit, effects = "zBase:Trt",
+                      conditions = conditions))
+```
+
+
+
+
+可否导出数据？
+```{r}
+plot(me)
+```
+
+
+```{r}
+ggplot(me[[1]], aes(x = sex, y = estimate__,  colour = cats__)) + 
+  geom_point(size = 4) +
+  geom_line(aes(group = cats__)) +
+  geom_errorbar(aes(ymin = lower__, ymax = upper__), width = 0.05)
+
+```
+
+```{r}
+me_children_num <- brms::marginal_effects(mod_brms, effect = "children_num", categorical = TRUE)
+me_children_num[[1]]
+```
+
+
+
+```{r}
+me_children_num[[1]] %>% 
+  ggplot(aes(x = children_num, y = estimate__,  colour = cats__)) + 
+  geom_line(aes(group = cats__), size = 1) +
+  geom_smooth(aes(ymin = lower__, ymax = upper__, fill = cats__), 
+              stat = "identity")
+```
+
+
+
+```{r}
+mod_brms %>% 
+  fixef() %>% 
+  as.data.frame() %>% 
+  rownames_to_column()
+```
